@@ -62,7 +62,7 @@ Example JSON structure:
 ```json
 {
   "nodes": [
-    { "id": "node-1", "label": "Idea", "tagColor": "#6366F1" }
+    { "id": "node-1", "label": "Idea", "tag": "core", "tagColor": "#6366F1" }
   ],
   "edges": [
     { "source": "node-1", "target": "node-2" }

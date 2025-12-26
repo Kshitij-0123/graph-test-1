@@ -6,7 +6,6 @@ import ReactFlow, {
   applyEdgeChanges,
   applyNodeChanges,
   addEdge,
-  MarkerType,
   type Connection,
   type Edge,
   type Node,
@@ -17,6 +16,7 @@ import { marked } from 'marked';
 
 type GraphNodeData = {
   label: string;
+  tag: string;
   tagColor: string;
 };
 
@@ -25,15 +25,9 @@ type GraphFile = {
   baseDir: string;
 };
 
-type TagMeta = {
-  id: string;
-  name: string;
-  color: string;
-};
-
 type GraphJson = {
-  nodes: Array<{ id: string; label: string; tagColor: string }>;
-  edges: Array<{ source: string; target: string; directed?: boolean }>;
+  nodes: Array<{ id: string; label: string; tag: string; tagColor: string }>;
+  edges: Array<{ source: string; target: string }>;
 };
 
 const nodeWidth = 220;
@@ -66,7 +60,9 @@ const layoutGraph = (nodes: Node<GraphNodeData>[], edges: Edge[]): Node<GraphNod
 const GraphNode = ({ data }: { data: GraphNodeData }) => {
   return (
     <div className="node-card">
-      <div className="node-tag" style={{ backgroundColor: data.tagColor }} />
+      <div className="node-tag" style={{ backgroundColor: data.tagColor }}>
+        {data.tag || 'tag'}
+      </div>
       <div className="node-label">{data.label || 'Untitled'}</div>
     </div>
   );
@@ -75,42 +71,30 @@ const GraphNode = ({ data }: { data: GraphNodeData }) => {
 const initialNodes: Node<GraphNodeData>[] = [
   {
     id: 'node-1',
-    data: { label: 'Idea', tagColor: '#6366F1' },
+    data: { label: 'Idea', tag: 'core', tagColor: '#6366F1' },
     position: { x: 0, y: 0 },
     type: 'graphNode'
   },
   {
     id: 'node-2',
-    data: { label: 'Next', tagColor: '#22C55E' },
+    data: { label: 'Next', tag: 'todo', tagColor: '#22C55E' },
     position: { x: 300, y: 0 },
     type: 'graphNode'
   }
 ];
 
-const defaultEdgeStyle = { stroke: '#94a3b8', strokeWidth: 2 };
-
-const initialEdges: Edge[] = [
-  {
-    id: 'e1-2',
-    source: 'node-1',
-    target: 'node-2',
-    type: 'smoothstep',
-    style: defaultEdgeStyle,
-    data: { directed: true },
-    markerEnd: { type: MarkerType.ArrowClosed, color: defaultEdgeStyle.stroke }
-  }
-];
+const initialEdges: Edge[] = [{ id: 'e1-2', source: 'node-1', target: 'node-2' }];
 
 const createGraphJson = (nodes: Node<GraphNodeData>[], edges: Edge[]): GraphJson => ({
   nodes: nodes.map((node) => ({
     id: node.id,
     label: node.data.label,
+    tag: node.data.tag,
     tagColor: node.data.tagColor
   })),
   edges: edges.map((edge) => ({
     source: edge.source,
-    target: edge.target,
-    directed: edge.data?.directed ?? true
+    target: edge.target
   }))
 });
 
@@ -122,40 +106,23 @@ const parseGraphJson = (raw: string): GraphJson => {
   };
 };
 
-const createNode = (label = 'New node', tagColor = '#38BDF8'): Node<GraphNodeData> => ({
+const createNode = (label = 'New node'): Node<GraphNodeData> => ({
   id: `node-${crypto.randomUUID()}`,
   type: 'graphNode',
   position: { x: 100, y: 100 },
   data: {
     label,
-    tagColor
+    tag: 'tag',
+    tagColor: '#38BDF8'
   }
-});
-
-const createEdge = (connection: Connection, directed = true): Edge => ({
-  id: `e-${connection.source}-${connection.target}-${crypto.randomUUID()}`,
-  source: connection.source!,
-  target: connection.target!,
-  type: 'smoothstep',
-  style: defaultEdgeStyle,
-  data: { directed },
-  markerEnd: directed ? { type: MarkerType.ArrowClosed, color: defaultEdgeStyle.stroke } : undefined
 });
 
 const App = () => {
   const [nodes, setNodes] = useState<Node<GraphNodeData>[]>(() => layoutGraph(initialNodes, initialEdges));
   const [edges, setEdges] = useState<Edge[]>(initialEdges);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [graphFile, setGraphFile] = useState<GraphFile | null>(null);
   const [nodeNotes, setNodeNotes] = useState<Record<string, string>>({});
-  const [tags, setTags] = useState<TagMeta[]>([
-    { id: 'tag-core', name: 'Core', color: '#6366F1' },
-    { id: 'tag-todo', name: 'Todo', color: '#22C55E' }
-  ]);
-  const [selectedTagColor, setSelectedTagColor] = useState<string | null>(null);
-  const [newTagName, setNewTagName] = useState('');
-  const [newTagColor, setNewTagColor] = useState('#38BDF8');
   const [status, setStatus] = useState('Ready');
   const saveTimeout = useRef<number | null>(null);
 
@@ -163,24 +130,14 @@ const App = () => {
 
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) || null;
   const selectedNote = selectedNodeId ? nodeNotes[selectedNodeId] ?? '' : '';
-  const selectedEdge = edges.find((edge) => edge.id === selectedEdgeId) || null;
-
-  const visibleNodes = useMemo(() => {
-    if (!selectedTagColor) return nodes;
-    return nodes.map((node) => ({
-      ...node,
-      className: node.data.tagColor === selectedTagColor ? 'node--focused' : 'node--dim'
-    }));
-  }, [nodes, selectedTagColor]);
 
   const onConnect = useCallback(
-    (connection: Connection) => setEdges((eds) => addEdge(createEdge(connection), eds)),
+    (connection: Connection) => setEdges((eds) => addEdge(connection, eds)),
     []
   );
 
   const onAddNode = () => {
-    const fallbackColor = tags[0]?.color ?? '#38BDF8';
-    setNodes((current) => [...current, createNode('New node', fallbackColor)]);
+    setNodes((current) => [...current, createNode()]);
   };
 
   const onDeleteNode = () => {
@@ -194,61 +151,8 @@ const App = () => {
     });
   };
 
-  const onDeleteEdge = () => {
-    if (!selectedEdgeId) return;
-    setEdges((current) => current.filter((edge) => edge.id !== selectedEdgeId));
-    setSelectedEdgeId(null);
-  };
-
-  const onToggleEdgeDirection = () => {
-    if (!selectedEdgeId) return;
-    setEdges((current) =>
-      current.map((edge) => {
-        if (edge.id !== selectedEdgeId) return edge;
-        const directed = !(edge.data?.directed ?? true);
-        return {
-          ...edge,
-          data: { ...edge.data, directed },
-          markerEnd: directed ? { type: MarkerType.ArrowClosed, color: defaultEdgeStyle.stroke } : undefined
-        };
-      })
-    );
-  };
-
   const onAutoLayout = () => {
     setNodes((current) => layoutGraph(current, edges));
-  };
-
-  const onAddTag = () => {
-    const trimmed = newTagName.trim();
-    if (!trimmed) {
-      setStatus('Tag name is required.');
-      return;
-    }
-    if (tags.some((tag) => tag.color === newTagColor)) {
-      setStatus('Each tag color must be unique.');
-      return;
-    }
-    setTags((current) => [
-      ...current,
-      { id: `tag-${crypto.randomUUID()}`, name: trimmed, color: newTagColor }
-    ]);
-    setNewTagName('');
-    setStatus(`Added tag "${trimmed}".`);
-  };
-
-  const ensureTagsForColors = (colors: string[]) => {
-    setTags((current) => {
-      const existingColors = new Set(current.map((tag) => tag.color));
-      const additions = colors
-        .filter((color) => color && !existingColors.has(color))
-        .map((color, index) => ({
-          id: `tag-${crypto.randomUUID()}`,
-          name: `Tag ${current.length + index + 1}`,
-          color
-        }));
-      return additions.length ? [...current, ...additions] : current;
-    });
   };
 
   const handleOpen = async () => {
@@ -259,20 +163,15 @@ const App = () => {
       id: node.id,
       type: 'graphNode',
       position: { x: 0, y: 0 },
-      data: { label: node.label, tagColor: node.tagColor }
+      data: { label: node.label, tag: node.tag, tagColor: node.tagColor }
     }));
     const loadedEdges = data.edges.map((edge, index) => ({
       id: `e-${edge.source}-${edge.target}-${index}`,
       source: edge.source,
-      target: edge.target,
-      type: 'smoothstep',
-      style: defaultEdgeStyle,
-      data: { directed: edge.directed ?? true },
-      markerEnd: edge.directed ?? true ? { type: MarkerType.ArrowClosed, color: defaultEdgeStyle.stroke } : undefined
+      target: edge.target
     }));
     setNodes(layoutGraph(loadedNodes, loadedEdges));
     setEdges(loadedEdges);
-    ensureTagsForColors(loadedNodes.map((node) => node.data.tagColor));
     setGraphFile({ filePath: result.filePath, baseDir: result.baseDir });
     setSelectedNodeId(null);
     setNodeNotes({});
@@ -315,7 +214,6 @@ const App = () => {
     setGraphFile(null);
     setSelectedNodeId(null);
     setNodeNotes({});
-    setSelectedTagColor(null);
     setStatus('New graph');
   };
 
@@ -374,12 +272,6 @@ const App = () => {
           <button type="button" onClick={onDeleteNode} disabled={!selectedNodeId}>
             Delete
           </button>
-          <button type="button" onClick={onToggleEdgeDirection} disabled={!selectedEdgeId}>
-            Toggle Direction
-          </button>
-          <button type="button" onClick={onDeleteEdge} disabled={!selectedEdgeId}>
-            Delete Edge
-          </button>
           <button type="button" onClick={onAutoLayout}>
             Auto Layout
           </button>
@@ -389,26 +281,13 @@ const App = () => {
       <div className="content">
         <div className="canvas">
           <ReactFlow
-            nodes={visibleNodes}
+            nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
             onNodesChange={(changes) => setNodes((current) => applyNodeChanges(changes, current))}
-            onEdgesChange={(changes) => {
-              setEdges((current) => applyEdgeChanges(changes, current));
-              if (changes.some((change) => change.type === 'remove' && change.id === selectedEdgeId)) {
-                setSelectedEdgeId(null);
-              }
-            }}
-            onNodeClick={(_, node) => {
-              setSelectedNodeId(node.id);
-              setSelectedEdgeId(null);
-            }}
-            onEdgeClick={(_, edge) => {
-              setSelectedEdgeId(edge.id);
-              setSelectedNodeId(null);
-            }}
+            onEdgesChange={(changes) => setEdges((current) => applyEdgeChanges(changes, current))}
+            onNodeClick={(_, node) => setSelectedNodeId(node.id)}
             onConnect={onConnect}
-            defaultEdgeOptions={{ type: 'smoothstep', style: defaultEdgeStyle }}
             fitView
           >
             <Background color="#1F2937" />
@@ -435,16 +314,19 @@ const App = () => {
               </label>
               <label>
                 Tag
-                <select
+                <input
+                  type="text"
+                  value={selectedNode.data.tag}
+                  onChange={(event) => updateSelectedNode({ tag: event.target.value })}
+                />
+              </label>
+              <label>
+                Tag Color
+                <input
+                  type="color"
                   value={selectedNode.data.tagColor}
                   onChange={(event) => updateSelectedNode({ tagColor: event.target.value })}
-                >
-                  {tags.map((tag) => (
-                    <option key={tag.id} value={tag.color}>
-                      {tag.name}
-                    </option>
-                  ))}
-                </select>
+                />
               </label>
               <div className="markdown">
                 <div className="markdown-header">Node File</div>
@@ -464,73 +346,9 @@ const App = () => {
                 />
               </div>
             </div>
-          ) : selectedEdge ? (
-            <div className="editor edge-editor">
-              <div className="edge-title">Edge</div>
-              <p className="edge-meta">
-                {selectedEdge.source} → {selectedEdge.target}
-              </p>
-              <div className="edge-toggle">
-                <span>Directional</span>
-                <button type="button" onClick={onToggleEdgeDirection}>
-                  {selectedEdge.data?.directed ?? true ? 'On' : 'Off'}
-                </button>
-              </div>
-              <button type="button" className="danger" onClick={onDeleteEdge}>
-                Delete Edge
-              </button>
-            </div>
           ) : (
-            <p className="empty-state">Select a node or edge to edit its details.</p>
+            <p className="empty-state">Select a node to edit its label, tag, and notes.</p>
           )}
-          <div className="tags-panel">
-            <div className="tags-header">
-              <h3>Tags</h3>
-              <button type="button" onClick={() => setSelectedTagColor(null)}>
-                Clear Focus
-              </button>
-            </div>
-            <div className="tags-list">
-              {tags.map((tag) => {
-                const count = nodes.filter((node) => node.data.tagColor === tag.color).length;
-                const isFocused = selectedTagColor === tag.color;
-                return (
-                  <div key={tag.id} className={`tag-row ${isFocused ? 'is-focused' : ''}`}>
-                    <div className="tag-swatch" style={{ backgroundColor: tag.color }} />
-                    <div className="tag-info">
-                      <div className="tag-name">{tag.name}</div>
-                      <div className="tag-meta">{count} nodes</div>
-                    </div>
-                    <button type="button" onClick={() => setSelectedTagColor(tag.color)}>
-                      Focus
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="tag-create">
-              <label>
-                Tag Name
-                <input
-                  type="text"
-                  value={newTagName}
-                  onChange={(event) => setNewTagName(event.target.value)}
-                  placeholder="e.g. Research"
-                />
-              </label>
-              <label>
-                Tag Color
-                <input
-                  type="color"
-                  value={newTagColor}
-                  onChange={(event) => setNewTagColor(event.target.value)}
-                />
-              </label>
-              <button type="button" onClick={onAddTag}>
-                Add Tag
-              </button>
-            </div>
-          </div>
           {graphFile ? (
             <div className="file-info">
               <div>Graph file:</div>
